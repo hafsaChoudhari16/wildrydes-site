@@ -1,130 +1,416 @@
-# AWS Project - Build a Full End-to-End Web Application with 7 Services | Step-by-Step Tutorial
+# 🦄 Wild Rydes – Serverless Ride-Sharing Web Application
 
-This repo contains the code files used in this [YouTube video](https://youtu.be/K6v6t5z6AsU).
+A full-stack **serverless web application** built using AWS that allows users to create an account, authenticate securely, and request a unicorn ride by selecting a pickup location.
 
-## TL;DR
-We're creating a web application for a unicorn ride-sharing service called Wild Rydes (from the original [Amazon workshop](https://aws.amazon.com/serverless-workshops)).  The app uses IAM, Amplify, Cognito, Lambda, API Gateway and DynamoDB, with code stored in GitHub and incorporated into a CI/CD pipeline with Amplify.
+This project demonstrates how multiple AWS services can be integrated to build a scalable, secure, and serverless application without managing traditional backend servers.
 
-The app will let you create an account and log in, then request a ride by clicking on a map (powered by ArcGIS).  The code can also be extended to build out more functionality.
+---
 
-## Cost
-All services used are eligible for the [AWS Free Tier](https://aws.amazon.com/free/).  Outside of the Free Tier, there may be small charges associated with building the app (less than $1 USD), but charges will continue to incur if you leave the app running.  Please see the end of the YouTube video for instructions on how to delete all resources used in the video.
+## 📌 Project Overview
 
-## The Application Code
-The application code is here in this repository.
+**Wild Rydes** is a unicorn ride-sharing application where authenticated users can request a ride by selecting their pickup location.
 
-## The Lambda Function Code
-Here is the code for the Lambda function, originally taken from the [AWS workshop](https://aws.amazon.com/getting-started/hands-on/build-serverless-web-app-lambda-apigateway-s3-dynamodb-cognito/module-3/ ), and updated for Node 20.x:
+The application uses **Amazon Cognito for authentication, API Gateway for the REST API, AWS Lambda for backend processing, and Amazon DynamoDB for data storage.** The frontend is hosted using AWS Amplify, while GitHub is used for source-code management and deployment.
 
-```node
-import { randomBytes } from 'crypto';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+---
 
-const client = new DynamoDBClient({});
-const ddb = DynamoDBDocumentClient.from(client);
+## ✨ Features
 
+* 🔐 User registration and authentication
+* 📧 Email-based user attributes through Amazon Cognito
+* 🗺️ Map-based ride requests
+* 🦄 Random unicorn assignment
+* 🌐 REST API using Amazon API Gateway
+* ⚡ Serverless backend using AWS Lambda
+* 💾 Ride data stored in Amazon DynamoDB
+* 🔑 Cognito-based API authorization using JWT tokens
+* 🛡️ IAM-based permissions and access control
+* 🚀 Frontend hosting and deployment using AWS Amplify
+* 📦 Source-code management using GitHub
+
+---
+
+## 🏗️ Architecture
+
+The application follows a serverless architecture:
+
+```text
+User
+  │
+  ▼
+Web Application
+  │
+  ▼
+AWS Amplify
+  │
+  ▼
+Amazon Cognito
+  │
+  │ JWT Token
+  ▼
+Amazon API Gateway
+  │
+  │ POST /ride
+  ▼
+AWS Lambda
+  │
+  ▼
+Amazon DynamoDB
+```
+
+### Supporting Services
+
+```text
+GitHub ───────────────► AWS Amplify
+                           │
+                           │ Deployment
+                           ▼
+                        Frontend
+
+AWS IAM ───────────────► AWS Resources
+                           │
+                           ├── Lambda
+                           ├── DynamoDB
+                           └── API Gateway
+```
+
+---
+
+## ☁️ AWS Services Used
+
+| Service                | Purpose                                                        |
+| ---------------------- | -------------------------------------------------------------- |
+| **AWS Amplify**        | Hosts and deploys the frontend application                     |
+| **Amazon Cognito**     | Handles user authentication and user management                |
+| **Amazon API Gateway** | Provides the REST API endpoint and authorization               |
+| **AWS Lambda**         | Processes ride requests and contains backend logic             |
+| **Amazon DynamoDB**    | Stores ride information                                        |
+| **AWS IAM**            | Manages permissions and access between AWS resources           |
+| **GitHub**             | Stores source code and integrates with the deployment workflow |
+
+---
+
+## 🔐 Authentication
+
+Amazon Cognito is used to manage users and secure access to the application.
+
+The configured user pool uses:
+
+* **Username** as the sign-in identifier
+* **Email** as a required user attribute
+* Cognito User Pool authentication
+* JWT tokens for authenticated requests
+
+The authenticated user's Cognito username is retrieved by the Lambda function from the API Gateway authorizer.
+
+```javascript
+const username =
+    event.requestContext.authorizer.claims['cognito:username'];
+```
+
+This username is then stored along with the ride information in DynamoDB.
+
+---
+
+## 🌐 API Gateway
+
+Amazon API Gateway exposes the ride-request API.
+
+### Endpoint
+
+```text
+POST /ride
+```
+
+The API is protected using a **Cognito authorizer**.
+
+The client sends an authentication token with the request:
+
+```text
+Authorization: <JWT Token>
+```
+
+API Gateway validates the authenticated request before invoking the Lambda function.
+
+---
+
+## ⚡ AWS Lambda
+
+The backend is implemented using:
+
+```text
+Runtime: Node.js 24.x
+AWS SDK: JavaScript SDK v3
+```
+
+The Lambda function is responsible for:
+
+1. Validating the API authorization configuration
+2. Generating a unique Ride ID
+3. Retrieving the authenticated username
+4. Reading the pickup location
+5. Selecting a unicorn from the available fleet
+6. Saving the ride information to DynamoDB
+7. Returning the ride details to the client
+
+### Unicorn Fleet
+
+The application currently uses a sample fleet:
+
+```javascript
 const fleet = [
     { Name: 'Angel', Color: 'White', Gender: 'Female' },
     { Name: 'Gil', Color: 'White', Gender: 'Male' },
     { Name: 'Rocinante', Color: 'Yellow', Gender: 'Female' },
 ];
-
-export const handler = async (event, context) => {
-    if (!event.requestContext.authorizer) {
-        return errorResponse('Authorization not configured', context.awsRequestId);
-    }
-
-    const rideId = toUrlString(randomBytes(16));
-    console.log('Received event (', rideId, '): ', event);
-
-    const username = event.requestContext.authorizer.claims['cognito:username'];
-    const requestBody = JSON.parse(event.body);
-    const pickupLocation = requestBody.PickupLocation;
-
-    const unicorn = findUnicorn(pickupLocation);
-
-    try {
-        await recordRide(rideId, username, unicorn);
-        return {
-            statusCode: 201,
-            body: JSON.stringify({
-                RideId: rideId,
-                Unicorn: unicorn,
-                Eta: '30 seconds',
-                Rider: username,
-            }),
-            headers: {
-                'Access-Control-Allow-Origin': '*',
-            },
-        };
-    } catch (err) {
-        console.error(err);
-        return errorResponse(err.message, context.awsRequestId);
-    }
-};
-
-function findUnicorn(pickupLocation) {
-    console.log('Finding unicorn for ', pickupLocation.Latitude, ', ', pickupLocation.Longitude);
-    return fleet[Math.floor(Math.random() * fleet.length)];
-}
-
-async function recordRide(rideId, username, unicorn) {
-    const params = {
-        TableName: 'Rides',
-        Item: {
-            RideId: rideId,
-            User: username,
-            Unicorn: unicorn,
-            RequestTime: new Date().toISOString(),
-        },
-    };
-    await ddb.send(new PutCommand(params));
-}
-
-function toUrlString(buffer) {
-    return buffer.toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=/g, '');
-}
-
-function errorResponse(errorMessage, awsRequestId) {
-    return {
-        statusCode: 500,
-        body: JSON.stringify({
-            Error: errorMessage,
-            Reference: awsRequestId,
-        }),
-        headers: {
-            'Access-Control-Allow-Origin': '*',
-        },
-    };
-}
 ```
 
-## The Lambda Function Test Function
-Here is the code used to test the Lambda function:
+A unicorn is randomly selected for each ride request.
+
+---
+
+## 💾 Amazon DynamoDB
+
+Ride information is stored in a DynamoDB table named:
+
+```text
+Rides
+```
+
+Each ride record contains:
+
+```text
+RideId
+User
+Unicorn
+RequestTime
+```
+
+Example:
 
 ```json
 {
-    "path": "/ride",
-    "httpMethod": "POST",
-    "headers": {
-        "Accept": "*/*",
-        "Authorization": "eyJraWQiOiJLTzRVMWZs",
-        "content-type": "application/json; charset=UTF-8"
-    },
-    "queryStringParameters": null,
-    "pathParameters": null,
-    "requestContext": {
-        "authorizer": {
-            "claims": {
-                "cognito:username": "the_username"
-            }
-        }
-    },
-    "body": "{\"PickupLocation\":{\"Latitude\":47.6174755835663,\"Longitude\":-122.28837066650185}}"
+  "RideId": "generated-ride-id",
+  "User": "username",
+  "Unicorn": {
+    "Name": "Angel",
+    "Color": "White",
+    "Gender": "Female"
+  },
+  "RequestTime": "2026-08-15T08:00:00.000Z"
 }
 ```
+
+---
+
+## 🔄 Application Workflow
+
+The complete request flow is:
+
+### 1. User Authentication
+
+The user creates an account and signs in through **Amazon Cognito**.
+
+### 2. Ride Request
+
+The authenticated user selects a pickup location on the map.
+
+### 3. API Request
+
+The frontend sends a:
+
+```text
+POST /ride
+```
+
+request to API Gateway along with the authentication token.
+
+### 4. Authorization
+
+API Gateway uses the Cognito authorizer to validate the user's JWT token.
+
+### 5. Lambda Processing
+
+The request is forwarded to AWS Lambda.
+
+Lambda:
+
+* Retrieves the authenticated user
+* Reads the pickup coordinates
+* Selects a unicorn
+* Generates a Ride ID
+
+### 6. Database Storage
+
+Lambda writes the ride information to the DynamoDB `Rides` table.
+
+### 7. Response
+
+The Lambda function returns the ride information to the frontend.
+
+Example:
+
+```json
+{
+  "RideId": "generated-ride-id",
+  "Unicorn": {
+    "Name": "Angel",
+    "Color": "White",
+    "Gender": "Female"
+  },
+  "Eta": "30 seconds",
+  "Rider": "username"
+}
+```
+
+---
+
+## 🔑 IAM & Security
+
+AWS IAM is used to control permissions between AWS resources.
+
+The Lambda execution role provides the permissions required for the function to interact with DynamoDB.
+
+The application also uses:
+
+* Amazon Cognito authentication
+* JWT-based API authorization
+* API Gateway authorization
+* IAM-based AWS resource permissions
+
+This follows the principle of giving AWS resources only the permissions required for their operations.
+
+---
+
+## 🔗 GitHub & Amplify
+
+The application source code is maintained in **GitHub**.
+
+AWS Amplify is connected to the application repository to provide frontend hosting and deployment.
+
+```text
+GitHub
+   │
+   │ Code Push
+   ▼
+AWS Amplify
+   │
+   │ Deployment
+   ▼
+Hosted Web Application
+```
+
+---
+
+## 🧪 Testing
+
+The Lambda function and API were tested using an authenticated ride request.
+
+### Test Request
+
+```json
+{
+  "path": "/ride",
+  "httpMethod": "POST",
+  "headers": {
+    "Accept": "*/*",
+    "Authorization": "<JWT_TOKEN>",
+    "content-type": "application/json"
+  },
+  "requestContext": {
+    "authorizer": {
+      "claims": {
+        "cognito:username": "the_username"
+      }
+    }
+  },
+  "body": "{\"PickupLocation\":{\"Latitude\":47.6174755835663,\"Longitude\":-122.28837066650185}}"
+}
+```
+
+### Successful Response
+
+```json
+{
+  "RideId": "generated-ride-id",
+  "Unicorn": {
+    "Name": "Angel",
+    "Color": "White",
+    "Gender": "Female"
+  },
+  "Eta": "30 seconds",
+  "Rider": "the_username"
+}
+```
+
+The generated ride was also verified in the DynamoDB `Rides` table.
+
+---
+
+## 🛠️ Technologies
+
+**Cloud Platform:** AWS
+**Frontend Hosting:** AWS Amplify
+**Authentication:** Amazon Cognito
+**API:** Amazon API Gateway
+**Backend:** AWS Lambda
+**Runtime:** Node.js 24.x
+**Database:** Amazon DynamoDB
+**Access Management:** AWS IAM
+**SDK:** AWS SDK for JavaScript v3
+**Version Control:** Git & GitHub
+
+---
+
+## 📚 Key Learning Outcomes
+
+Through this project, I gained practical experience with:
+
+* Building serverless applications on AWS
+* Designing a multi-service cloud architecture
+* Implementing authentication using Amazon Cognito
+* Securing APIs using JWT authorization
+* Building REST APIs with API Gateway
+* Developing serverless backend functions with Lambda
+* Using DynamoDB as a NoSQL database
+* Managing AWS IAM roles and permissions
+* Hosting and deploying applications with AWS Amplify
+* Connecting GitHub with AWS deployment workflows
+* Integrating multiple AWS services into a complete application
+
+---
+
+## 💰 Cost Considerations
+
+The application was developed using AWS Free Tier/available AWS credits where applicable.
+
+AWS resources should be terminated or deleted when the project is no longer being used to prevent unexpected charges.
+
+---
+
+## 🎯 Project Highlights
+
+This project demonstrates a complete serverless workflow:
+
+```text
+Authentication
+      ↓
+API Authorization
+      ↓
+REST API
+      ↓
+Serverless Backend
+      ↓
+NoSQL Database
+```
+
+It provides hands-on experience with **AWS cloud services, serverless architecture, authentication, API development, database management, IAM, and deployment automation**.
+
+---
+
+## 👨‍💻 Project
+
+### Wild Rydes – Serverless Ride-Sharing Web Application
+
+A hands-on AWS project demonstrating the integration of **AWS Amplify, Amazon Cognito, API Gateway, Lambda, DynamoDB, IAM, and GitHub** to build a complete serverless web application.
 
