@@ -32,7 +32,9 @@ The application uses **Amazon Cognito for authentication, API Gateway for the RE
 
 ## 🏗️ Architecture
 
-The application follows a serverless architecture:
+![AWS Serverless Architecture](./aws-architecture.png)
+
+The application follows a serverless architecture using AWS Amplify, Amazon Cognito, API Gateway, Lambda, DynamoDB, and IAM, with GitHub used for source-code management and deployment.
 
 ```text
 User
